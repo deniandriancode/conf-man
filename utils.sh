@@ -1,14 +1,13 @@
-#!/usr/bin/env bash
-
 #---------- CONSTANTS --------------
 RETURN_SUCCESS=0
 RETURN_FAILED=1
+PROGNAME="confman"
+VERSION="0.1.0"
 #-----------------------------------
 
 # define default text editor
-if [[ -z $EDITOR ]]
-then
-    EDITOR=nvim
+if [[ -z $EDITOR ]]; then
+    EDITOR=vim
 fi
 
 # define xdg config home environment variable
@@ -16,7 +15,34 @@ if [[ -z $XDG_CONFIG_HOME ]]; then
     XDG_CONFIG_HOME=$HOME/.config
 fi
 
-#---------------- Specific Function Definition ---------------
+# Define config file location
+conf_loc_vim=''
+conf_loc_neovim=''
+conf_loc_emacs=''
+
+# Declare config file locations
+conf_loc_vim=$HOME/.vimrc                              #-- vim
+[[ -f $XDG_CONFIG_HOME/nvim/init.vim ]] &&             #-- neovim
+    conf_loc_neovim=$XDG_CONFIG_HOME/nvim/init.vim ||
+    conf_loc_neovim=$XDG_CONFIG_HOME/nvim/init.lua
+[[ -f $HOME/.emacs ]] &&                               #-- emacs
+    conf_loc_emacs=$HOME/.emacs ||
+    conf_loc_emacs=$HOME/.emacs.d/init.el
+
+#----------- Config File and Global Variable Defintion -----------
+declare -A config_file_list=(
+    [vim]=$conf_loc_vim
+    [nvim]=$conf_loc_neovim
+    [neovim]=$conf_loc_neovim
+    [emacs]=$conf_loc_emacs
+    [dummy]=$HOME/.dummyrc # debug only
+)
+default_config_file=$HOME/.bashrc
+#-----------------------------------------------------------------
+
+#---------------- Util Functions Definition ---------------
+
+# exists_in_list $needle $haystack
 function exists_in_list()
 {
     local needle=$1
@@ -31,38 +57,8 @@ function exists_in_list()
     return $RETURN_FAILED
 }
 
-function open_config_vim()
-{
-    $EDITOR $HOME/.vimrc
-}
-
-# using vimscript by default
-# TODO: use getopt to set option to use lua config instead of vimscript
-function open_config_neovim()
-{
-
-    if [[ ! -d $XDG_CONFIG_HOME/nvim ]]; then
-        mkdir $XDG_CONFIG_HOME/nvim
-        touch $XDG_CONFIG_HOME/nvim/init.vim
-    fi
-    $EDITOR $XDG_CONFIG_HOME/nvim/init.vim
-}
-
-# the default emacs config is in $HOME/.emacs.d/init.el unless $HOME/.emacs file already exists
-function open_config_emacs()
-{
-    if [[ -f $HOME/.emacs ]]; then
-        $EDITOR $HOME/.emacs
-    elif [[ -f $HOME/.emacs.d/init.el ]]; then
-        $EDITOR $HOME/.emacs.d/init.el
-    else
-        mkdir $HOME/.emacs.d
-        touch $HOME/.emacs.d/init.el
-        $EDITOR $HOME/.emacs.d/init.el
-    fi
-}
-
-function confirm_remove_config()
+# confirm_delete_config $config_file
+function confirm_delete_config()
 {
     local conf_loc=$1
 
@@ -83,87 +79,122 @@ function confirm_remove_config()
     done
 }
 
-function remove_config_vim()
-{
-    if [[ ! -f $HOME/.vimrc ]]; then
-        echo "You don't have vim config file." >&2
-        return $RETURN_FAILED
-    fi
-
-    confirm_remove_config "$HOME/.vimrc"
-}
-
-function remove_config_neovim()
-{
-    if [[ ! -f $XDG_CONFIG_HOME/nvim/init.vim ]]; then
-        echo "You don't have neovim config file." >&2
-        return $RETURN_FAILED
-    fi
-
-    confirm_remove_config "$XDG_CONFIG_HOME/nvim"
-}
-
-function remove_config_emacs()
-{
-    if [[ ! -f $HOME/.emacs || ! -f $HOME/.emacs.d/init.el ]]; then
-        echo "You don't have emacs config file." >&2
-        return $RETURN_FAILED
-    fi
-
-    if [[ -f $HOME/.emacs ]]; then
-        confirm_remove_config "$HOME/.emacs"
-    elif [[ -f $HOME/.emacs.d/init.el ]]; then
-        confirm_remove_config "$HOME/.emacs.d"
-    fi
-
-}
-
 #----------------------------------------------------
 
 
-#-------------- General Function Definition --------------
+#-------------- Function Operation Definition --------------
+
+# open_config $config_file
 function open_config()
 {
     local config_file=$1
-    if ! exists_in_list $config_file "${config_file_list[@]}"; then
-        echo "Configuration file '$config_file' doesn't exist." >&2
+    if [[ -n $config_file ]] && ! exists_in_list $config_file "${!config_file_list[@]}"; then
+        echo "Configuration file for '$config_file' doesn't exist." >&2
         return $RETURN_FAILED
     fi
 
-    case $config_file in
-        vim)
-            open_config_vim
-            ;;
-        nvim | neovim)
-            open_config_neovim
-            ;;
-        emacs)
-            open_config_emacs
-            ;;
-    esac
+    if [[ -z $config_file ]]; then
+        $EDITOR $default_config_file
+        return $RETURN_SUCCESS
+    fi
+
+    $EDITOR ${config_file_list[$config_file]}
 
     return $RETURN_SUCCESS
 }
 
-function remove_config()
+# delete_config $config_file
+function delete_config()
 {
     local config_file=$1
 
-    case $config_file in
-        vim)
-            remove_config_vim
-            ;;
-        nvim | neovim)
-            remove_config_neovim
-            ;;
-        emacs)
-            remove_config_emacs
-            ;;
-    esac
+    if [[ -z $config_file ]]; then
+        echo "Please enter config file you want to delete." >&2
+        return $RETURN_FAILED
+    fi
+
+    if [[ ! -f ${config_file_list[$config_file]} ]] || ! exists_in_list $config_file "${!config_file_list[@]}"; then
+        echo "You don't have '$config_file' config file" >&2
+        return $RETURN_FAILED
+    fi
+
+    confirm_delete_config ${config_file_list[$config_file]}
+
+    return $RETURN_SUCCESS
+}
+
+# backup_config $config_file
+function backup_config()
+{
+    local config_file=$1
+
+    if [[ -z config_file ]]; then
+        echo "Please enter config file you want to backup." >&2
+        return $RETURN_FAILED
+    fi
+
+    if [[ ! -f ${config_file_list[$config_file]} ]] || ! exists_in_list $config_file "${!config_file_list[@]}"; then
+        echo "You don't have '$config_file' config file" >&2
+        return $RETURN_FAILED
+    fi
+
+    cp -rv ${config_file_list[$config_file]} ${config_file_list[$config_file]}.bak
+
+    return $RETURN_SUCCESS
+}
+
+# copy_config $config_file_src $config_file_dest
+function copy_config()
+{
+    local config_file_src=$1
+    local config_file_dest=$2
+
+    if [[ -z config_file_src ]]; then
+        echo "Please enter config file you want to copy." >&2
+        return $RETURN_FAILED
+    fi
+
+    if [[ -z config_file_dest ]]; then
+        echo "Please enter destination file." >&2
+        return $RETURN_FAILED
+    fi
+
+    if [[ ! -f ${config_file_list[$config_file_src]} ]] || ! exists_in_list $config_file_src "${!config_file_list[@]}"; then
+        echo "You don't have '$config_file' config file" >&2
+        return $RETURN_FAILED
+    fi
+
+    cp -rv ${config_file_list[$config_file_src]} ${config_file_dest}
+
+    return $RETURN_SUCCESS
+}
+
+function version_info()
+{
+    echo "$PROGNAME v$VERSION"
+
+    return $RETURN_SUCCESS
 }
 
 #---------------------------------------------------------
 
+
+#---------------- Help Function --------------------------
+function help_prompt()
+{
+    echo "Usage: $(basename $PROGNAME) [options] file"
+    echo "Options:"
+    echo "      -o    open config"
+    echo "      -d    delete config"
+    echo "      -b    backup config"
+    echo "      -h -? show this message"
+    echo "      -V    print software version"
+
+    return $RETURN_SUCCESS
+}
+#---------------------------------------------------------
+
+#---------------------------------------------------------
 # TODO copy config
 # TODO connect to remote
 # TODO add more config
